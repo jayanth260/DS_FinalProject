@@ -6,7 +6,7 @@ use std::thread;
 mod HandleServent;
 mod HandleClient;
 pub mod InitializeConn;
-pub mod Messages;
+mod Messages;
 
 fn main() -> std::io::Result<()> {    
     let args: Vec<String> = env::args().collect();
