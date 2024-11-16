@@ -6,14 +6,14 @@ use std::thread;
 mod HandleServent;
 mod HandleClient;
 pub mod InitializeConn;
-
+pub mod Messages;
 
 fn main() -> std::io::Result<()> {    
     let args: Vec<String> = env::args().collect();
     let listener = TcpListener::bind(args[1].clone())?;
 
     println!("Server listening on {}", args[1]);
-
+    
     let handle= thread::spawn(
         move|| {
         for stream in listener.incoming() {
