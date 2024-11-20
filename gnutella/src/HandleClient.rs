@@ -20,8 +20,9 @@ pub fn handle_requests(mut stream: TcpStream) -> io::Result<()> {
     Ok(())
 }
 
+
 fn send_ping(stream: &mut TcpStream) -> Result<(),std::io::Error>  {
-    
+
     let ping_header = Messages::Header::new(
         Messages::generate_desid(),
         Messages::Payload_type::Ping,

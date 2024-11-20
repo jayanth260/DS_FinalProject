@@ -20,10 +20,7 @@ pub struct Header{
     Payload_Length: u32,
 }
 
-#[derive(Debug)]
-pub struct Payload{
-    
-}
+
 
 impl Header {
 

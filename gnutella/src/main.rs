@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 mod HandleServent;
 mod HandleClient;
 pub mod InitializeConn;
+pub mod Pong;
 mod Messages;
 
 fn check_streams(streams: &mut Vec<Option<TcpStream>>) -> Result<(), std::io::Error> {
