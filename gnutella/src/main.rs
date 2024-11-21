@@ -12,6 +12,7 @@ mod HandleServent;
 pub mod InitializeConn;
 mod Messages;
 pub mod Pong;
+pub mod HandleFiles;
 
 pub static GLOBAL_PONG_PAYLOAD: Lazy<Mutex<Pong::Pong_Payload>> = Lazy::new(|| {
     Mutex::new(Pong::Pong_Payload {
@@ -102,18 +103,35 @@ fn check_streams(streams: &mut Vec<Option<TcpStream>>) -> Result<(), std::io::Er
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
+    if args.len() < 4 {
+        eprintln!("Usage: {} <ip:port> <connect_address> <file_paths_list>", args[0]);
+        std::process::exit(1);
+    }
+
+    let (num_files, total_kb) = match HandleFiles::PathValidator::validate_and_store_file_paths(&args[3]) {
+        Ok((num_files, total_kb)) => {
+            println!("Validated {} file paths successfully, total size: {} KB", num_files, total_kb);
+            (num_files, total_kb)
+        },
+        Err(e) => {
+            eprintln!("Error validating file paths: {}", e);
+            return Err(e);
+        }
+    };
+    
     let listener = TcpListener::bind(args[1].clone())?;
     println!("Server listening on {}", args[1]);
 
+
+
     if let Ok(mut payload) = GLOBAL_PONG_PAYLOAD.lock() {
-        // Split first argument into IP and port
+        // split first arg into IP and port
         let parts: Vec<&str> = args[1].split(':').collect();
         payload.Ip = parts[0].to_string();
         payload.Port = parts[1].to_string();
-
-        // Convert string arguments to numbers
-        payload.Num_files = args[3].parse().unwrap_or(0);
-        payload.Num_kb = args[4].parse().unwrap_or(0);
+        
+        payload.Num_files = num_files as u32;
+        payload.Num_kb = total_kb as u32;
     }
 
     let listener = Arc::new(listener);
@@ -123,7 +141,7 @@ fn main() -> std::io::Result<()> {
     let streams_clone1 = Arc::clone(&streams);
     let streams_clone2 = Arc::clone(&streams);
 
-    // Spawn stream checker thread
+    // spawn stream checker thread
     let checker_handle = {
         let streams = Arc::clone(&streams);
         thread::spawn(move || loop {
@@ -153,7 +171,7 @@ fn main() -> std::io::Result<()> {
         }
     });
     handle.join().unwrap();
-    // Handle incoming connections
+    // handle incoming connections
     for stream in handle_listener.incoming() {
         match stream {
             Ok(stream) => {
