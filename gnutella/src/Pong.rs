@@ -80,7 +80,7 @@ pub fn send_pong(stream: &mut TcpStream,payload:Vec<u8>, id: &String, ttl: &u8, 
             14
         ).to_bytes();
         let combined_bytes = [header_bytes, payload].concat();
-        println!("{:?}",combined_bytes);
+        // println!("{:?}",combined_bytes);
 
         stream.write_all(&combined_bytes);
 

@@ -9,83 +9,117 @@ use crate::PingPath;
 
 use crate::GLOBAL_PONG_PAYLOAD;
 
+pub fn handle_connection(streams: &mut Vec<Option<TcpStream>>, mut stream: TcpStream, bytes_read: usize, buff: &[u8]) -> Result<(), std::io::Error> {
+    let mut current_buffer = &buff[..bytes_read];
 
-pub fn handle_connection(streams: &mut Vec<Option<TcpStream>>,mut stream: TcpStream,bytes_read: usize, buff: &[u8] ) -> Result<(), std::io::Error> {
-    
-    let mut buffer = buff.clone();
-    // let bytes_read = stream.read(&mut buff)?;
-    let mut response = String::from_utf8_lossy(&buff[..bytes_read]).to_string();
-    // println!("{}", response);
-    
-    if response.contains("CONNECT") {
-        InitializeConn::accept_conn(stream); // if connection is acceptable
-    }
-    else{
-
-        let response1 : Messages::Header = Messages::from_bytes(buffer).expect("REASON");
-        let payload_buff = &buffer[23..((response1.get_payload_length() as usize) + 23)];
-        // if response1.get_descriptor_id()=="Pong"{
-            
-            
+    while !current_buffer.is_empty() {
+        // Check if there's enough data to read the header
+        // if current_buffer.len() < 23 {
+        //     break;
         // }
-        if response1.get_payload_descriptor() == &Messages::Payload_type::Ping{
-            let id= response1.get_descriptor_id();
-            let ttl = response1.get_hops()+2;
 
-            if let Ok(payload) = GLOBAL_PONG_PAYLOAD.lock() {
-            Pong::send_pong(&mut stream,payload.to_bytes(), &id, &ttl,0);
-            }
+        // Parse the header
+        let response1 = match Messages::from_bytes(current_buffer) {
+            Some(header) => header,
+            None => break, // Invalid header, stop processing
+        };
 
-            if response1.get_ttl()!=0{
-                
-            PingPath::add_ping_path(Some(stream.try_clone().unwrap()), id.clone());
-            
+        if response1.get_payload_descriptor()==&Messages::Payload_type::Connect{
+            InitializeConn::accept_conn(stream.try_clone()?);
+            return Ok(());
 
-            for stream_option in streams.iter_mut(){
-                if let Some(stream1) = stream_option {
-                    if let (Ok(addr1), Ok(addr2)) = (stream1.peer_addr(), stream.peer_addr()) {
-                        if addr1 != addr2 {
-                            
-                                // Extract TcpStream from Option
-                                if let Some(stream_to_forward) = stream_option {
-                                    HandleClient::send_ping(stream_to_forward,id.clone(), response1.get_ttl()-1, response1.get_hops()+1);
-                                }
-                            }
-                        }
+        }
+
+        // Calculate total message length
+        let payload_length = response1.get_payload_length() as usize;
+        let total_message_length = 23 + payload_length;
+
+        // Check if we have the full message in the buffer
+        // if current_buffer.len() < total_message_length {
+        //     break; // Incomplete message, wait for more data
+        // }
+
+        // Extract payload
+        
+        let payload_buff = &current_buffer[23..total_message_length];
+
+        // Process message based on type
+        // println!("{:?}",response1);
+        match response1.get_payload_descriptor() {
+            Messages::Payload_type::Ping => {
+                handle_ping_message(streams, &mut stream, &response1, payload_buff)?;
+            },
+            Messages::Payload_type::Pong => {
+                handle_pong_message(&mut stream, &response1, payload_buff)?;
+            },
+            Messages::Payload_type::Connect|Messages::Payload_type::Push | Messages::Payload_type::Query | Messages::Payload_type::Query_Hit => todo!()
+        }
+    
+
+        // Move to the next message in the buffer
+        current_buffer = &current_buffer[total_message_length..];
+    }
+
+    Ok(())
+}
+
+fn handle_ping_message(
+    streams: &mut Vec<Option<TcpStream>>, 
+    current_stream: &mut TcpStream, 
+    header: &Messages::Header,
+    payload_buff: &[u8]
+) -> Result<(), std::io::Error> {
+    let id = header.get_descriptor_id();
+    let ttl = header.get_hops() + 2;
+
+    // Send Pong response
+    if let Ok(payload) = GLOBAL_PONG_PAYLOAD.lock() {
+        Pong::send_pong(current_stream, payload.to_bytes(), &id, &ttl, 0);
+    }
+
+    // Forward ping if TTL allows
+    if header.get_ttl() != 0 {
+        PingPath::add_ping_path(Some(current_stream.try_clone()?), id.clone());
+        
+        for stream_option in streams.iter_mut() {
+            if let Some(stream1) = stream_option {
+                if let (Ok(addr1), Ok(addr2)) = (stream1.peer_addr(), current_stream.peer_addr()) {
+                    if addr1 != addr2 {
+                        HandleClient::send_ping(
+                            stream1, 
+                            id.clone(), 
+                            header.get_ttl() - 1, 
+                            header.get_hops() + 1
+                        );
                     }
                 }
             }
         }
-        else if response1.get_payload_descriptor() == &Messages::Payload_type::Pong{
-            println!("pong message:{:?}", Pong::Pong_Payload::from_bytes(payload_buff));
-            println!("{:?}",stream);
-
-            let reverse_stream= PingPath::get_stream_by_id(response1.get_descriptor_id()) ;
-            if let Some(mut reverse_stream) = reverse_stream {
-                println!("pong reverse stream: {:?}", reverse_stream);
-                Pong::send_pong(
-                    &mut reverse_stream,
-                    payload_buff.to_vec(),
-                    &response1.get_descriptor_id(),
-                    &(response1.get_ttl() - 1),
-                    response1.get_hops() + 1
-                );
-            }
-
-
-
-        }
-        
-
-        // println!("{}",response1.get_descriptor_id());
-        // let ip: String="127.0.0.1".to_string();
-        // let port: String="5063".to_string();
-        // let pong_message= Pong::Pong_Payload::new(port,ip,5,300);
-        // println!("{:?}",pong_message);
-        // println!("{:?}",Pong::Pong_Payload::from_bytes(&pong_message.to_bytes()));
-    
     }
 
+    Ok(())
+}
 
+fn handle_pong_message(
+    current_stream: &mut TcpStream, 
+    header: &Messages::Header,
+    payload_buff: &[u8]
+) -> Result<(), std::io::Error> {
+    println!("Pong message: {:?}", Pong::Pong_Payload::from_bytes(payload_buff));
+    // println!("Stream: {:?}", current_stream);
+
+    let reverse_stream = PingPath::get_stream_by_id(header.get_descriptor_id());
+    if header.get_ttl() !=0{
+    if let Some(mut reverse_stream) = reverse_stream {
+        // println!("Pong reverse stream: {:?}", reverse_stream);
+        Pong::send_pong(
+            &mut reverse_stream,
+            payload_buff.to_vec(),
+            &header.get_descriptor_id(),
+            &(header.get_ttl() - 1),
+            header.get_hops() + 1
+        );
+    }
+    }
     Ok(())
 }

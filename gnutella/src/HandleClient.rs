@@ -32,8 +32,8 @@ pub fn send_ping(stream: &mut TcpStream,id: String,ttl: u8, hops:u8 ) -> Result<
     );
     
     let ping_header_bytes = ping_header.to_bytes();
-    println!("send ping: {:?}", ping_header_bytes);
-    println!("send ping: {:?}",Messages::from_bytes(&ping_header_bytes));
+    // println!("send ping: {:?}", ping_header_bytes);
+    println!("sending ping: {:?}",Messages::from_bytes(&ping_header_bytes));
     stream.write_all(&ping_header_bytes)?;
     stream.flush()?; 
     

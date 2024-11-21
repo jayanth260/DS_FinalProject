@@ -8,7 +8,7 @@ pub fn request_conn( stream: &mut TcpStream) ->Result<String,std::io::Error>  {
     let x = stream.write_all(message.as_bytes());
     stream.flush();
     
-    println!("{:?}",x);
+    // println!("{:?}",x);
     
     let mut buff=[0;25];
     let bytes_read= stream.read(&mut buff)?;
@@ -26,7 +26,7 @@ pub fn request_conn( stream: &mut TcpStream) ->Result<String,std::io::Error>  {
 }
 
 pub fn accept_conn(mut stream: TcpStream){
-
+    
     let mut message = "GNUTELLA/0.4 200 OK\n\n"; // response to connect request if acceptable
     stream.write_all(message.as_bytes());
 

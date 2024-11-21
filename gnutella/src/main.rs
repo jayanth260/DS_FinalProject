@@ -65,7 +65,7 @@ fn check_streams(streams: &mut Vec<Option<TcpStream>>) -> Result<(), std::io::Er
             let mut buff = [0; 1024];
             match stream.read(&mut buff) {
                 Ok(bytes_read) if bytes_read > 0 => {
-                    // println!("{:?}",buff);
+                    
                     if let Ok(stream_clone) = stream.try_clone() {
                         // Set blocking mode back for handling
                         stream_clone.set_nonblocking(false)?;
@@ -76,7 +76,7 @@ fn check_streams(streams: &mut Vec<Option<TcpStream>>) -> Result<(), std::io::Er
                 }
                 Ok(_) => {
                     // Zero bytes read - connection closed by peer
-                    println!("mkl");
+                    
                     *stream_option = None;
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {

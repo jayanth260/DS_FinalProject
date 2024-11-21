@@ -9,6 +9,7 @@ pub enum Payload_type{
     Push=64,
     Query=128,
     Query_Hit=129,
+    Connect=200,
 }
 
 #[derive(Debug)]
@@ -68,6 +69,7 @@ impl Header {
             Payload_type::Push => 0x40,
             Payload_type::Query => 0x80,
             Payload_type::Query_Hit => 0x81,
+            Payload_type::Connect => 0xC8,
         });
 
         bytes.push(self.TTL);
@@ -82,6 +84,19 @@ impl Header {
 }
 
 pub fn from_bytes(bytes: &[u8]) -> Option<Header> {
+    
+    let mut response = String::from_utf8_lossy(&bytes).to_string();
+    
+    if response.contains("CONNECT") {
+        return Some(Header {
+            Descriptor_ID: "0".to_string(),
+            Payload_Descriptor: Payload_type::Connect,
+            TTL: 0,
+            Hops: 0,
+            Payload_Length: 0,
+        });
+    }
+    
     if bytes.len() < 23 {
         return None;
     }
