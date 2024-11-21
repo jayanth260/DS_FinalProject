@@ -1,13 +1,17 @@
 use std::io::prelude::*;
 use std::net::Ipv4Addr;
+use std::net::TcpStream;
 
+
+
+use crate::Messages;
 
 #[derive(Debug)]
 pub struct Pong_Payload{
-    Port: String,
-    Ip: String,
-    Num_files: u32,
-    Num_kb: u32
+    pub Port: String,
+    pub Ip: String,
+    pub Num_files: u32,
+    pub Num_kb: u32
 }
 
 
@@ -25,7 +29,7 @@ impl Pong_Payload{
         let mut bytes = Vec::with_capacity(14); 
         for chunk in self.Port.as_bytes().chunks(8){
         if let Ok(byte)= self.Port.parse::<u16>(){
-            println!("{}",byte);
+            // println!("{}",byte);
             bytes.extend_from_slice(&byte.to_be_bytes());
         }
     }
@@ -45,10 +49,8 @@ impl Pong_Payload{
     
 
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-            if bytes.len() != 14 {
-                    return Err("Invalid byte array length".to_string());
-                }
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+            
         
                 // Extract and parse fields from the byte array
             let port = u16::from_be_bytes([bytes[0], bytes[1]]);
@@ -56,17 +58,35 @@ impl Pong_Payload{
             let num_files = u32::from_be_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]);
             let num_kb = u32::from_be_bytes([bytes[10], bytes[11], bytes[12], bytes[13]]);
         
-                Ok(Self {
+                Self {
                     Port:port.to_string(),
-                    Ip:ip,
+                    Ip:ip.to_string(),
                     Num_files: num_files,
                     Num_kb: num_kb,
-                })
+                }
             }
 }
 
-// pub fn from_bytes(bytes: &[u8])-> Pong_Payload{
+
+pub fn send_pong(stream: &mut TcpStream,payload:Vec<u8>, id: &String, ttl: &u8, hops: u8){
+    
+        // println!("{:?}", payload.Port);
+        // let payload_bytes= payload.to_bytes();
+        let header_bytes= Messages::Header::new(
+            id.clone(),
+            Messages::Payload_type::Pong,
+            ttl.clone(),
+            hops,
+            14
+        ).to_bytes();
+        let combined_bytes = [header_bytes, payload].concat();
+        println!("{:?}",combined_bytes);
+
+        stream.write_all(&combined_bytes);
 
 
+    
 
-// }
+} 
+
+

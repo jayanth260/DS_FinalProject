@@ -13,7 +13,7 @@ pub fn request_conn( stream: &mut TcpStream) ->Result<String,std::io::Error>  {
     let mut buff=[0;25];
     let bytes_read= stream.read(&mut buff)?;
     stream.flush()?;
-    thread::sleep(time::Duration::from_millis(1000));
+    // thread::sleep(time::Duration::from_millis(1000));
     // stream.write_all(message.as_bytes());
     // stream.flush()?;
     

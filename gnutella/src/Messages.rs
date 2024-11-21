@@ -2,7 +2,7 @@
 use std::io::prelude::*;
 use rand::Rng;
 
-#[derive(Debug)]
+#[derive(PartialEq,Debug)]
 pub enum Payload_type{
     Ping=0,
     Pong=1,

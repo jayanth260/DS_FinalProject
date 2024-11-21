@@ -80,6 +80,7 @@ name = "gnutella"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "once_cell",
  "prost",
  "prost-build",
  "prost-types",
