@@ -1,19 +1,19 @@
 // use std::string;
-use std::io::prelude::*;
 use rand::Rng;
+use std::io::prelude::*;
 
-#[derive(PartialEq,Debug)]
-pub enum Payload_type{
-    Ping=0,
-    Pong=1,
-    Push=64,
-    Query=128,
-    Query_Hit=129,
-    Connect=200,
+#[derive(PartialEq, Debug)]
+pub enum Payload_type {
+    Ping = 0,
+    Pong = 1,
+    Push = 64,
+    Query = 128,
+    Query_Hit = 129,
+    Connect = 200,
 }
 
 #[derive(Debug)]
-pub struct Header{
+pub struct Header {
     Descriptor_ID: String,
     Payload_Descriptor: Payload_type,
     TTL: u8,
@@ -21,11 +21,14 @@ pub struct Header{
     Payload_Length: u32,
 }
 
-
-
 impl Header {
-
-    pub fn new(descriptor_id: String, payload_descriptor: Payload_type, ttl: u8, hops: u8, payload_length: u32) -> Header {
+    pub fn new(
+        descriptor_id: String,
+        payload_descriptor: Payload_type,
+        ttl: u8,
+        hops: u8,
+        payload_length: u32,
+    ) -> Header {
         Header {
             Descriptor_ID: descriptor_id,
             Payload_Descriptor: payload_descriptor,
@@ -55,7 +58,7 @@ impl Header {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(23); 
+        let mut bytes = Vec::with_capacity(23);
 
         for chunk in self.Descriptor_ID.as_bytes().chunks(8) {
             if let Ok(byte) = u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 2) {
@@ -78,15 +81,11 @@ impl Header {
         bytes.extend_from_slice(&self.Payload_Length.to_be_bytes());
         bytes
     }
-
-    
-
 }
 
 pub fn from_bytes(bytes: &[u8]) -> Option<Header> {
-    
     let mut response = String::from_utf8_lossy(&bytes).to_string();
-    
+
     if response.contains("CONNECT") {
         return Some(Header {
             Descriptor_ID: "0".to_string(),
@@ -96,7 +95,7 @@ pub fn from_bytes(bytes: &[u8]) -> Option<Header> {
             Payload_Length: 0,
         });
     }
-    
+
     if bytes.len() < 23 {
         return None;
     }
@@ -115,9 +114,7 @@ pub fn from_bytes(bytes: &[u8]) -> Option<Header> {
         _ => return None,
     };
 
-    let payload_length = u32::from_be_bytes([
-        bytes[19], bytes[20], bytes[21], bytes[22]
-    ]);
+    let payload_length = u32::from_be_bytes([bytes[19], bytes[20], bytes[21], bytes[22]]);
 
     Some(Header {
         Descriptor_ID: descriptor_id,
@@ -128,29 +125,26 @@ pub fn from_bytes(bytes: &[u8]) -> Option<Header> {
     })
 }
 
-pub fn print_header(header: Header){
+pub fn print_header(header: Header) {
     println!("des_id: {}", header.Descriptor_ID);
-    println!("payload type: 0x{:X}",header.Payload_Descriptor as u32);
-    println!("TTL: {}",header.TTL);
-    println!("Hops: {}",header.Hops);
-    println!("payload length: {}", header.Payload_Length );
-
+    println!("payload type: 0x{:X}", header.Payload_Descriptor as u32);
+    println!("TTL: {}", header.TTL);
+    println!("Hops: {}", header.Hops);
+    println!("payload length: {}", header.Payload_Length);
 }
 
-pub fn generate_desid()->String{
-    
+pub fn generate_desid() -> String {
     let mut des_id = [0u8; 16];
     let mut rng = rand::thread_rng();
     for i in 0..15 {
-        if i!=8{
-        des_id[i] = rng.gen::<u8>();
-    }else{des_id[i]=127;}
-
+        if i != 8 {
+            des_id[i] = rng.gen::<u8>();
+        } else {
+            des_id[i] = 127;
+        }
     }
-    des_id.iter()
-            .map(|byte| format!("{:08b}", byte))
-            .collect::<String>()
+    des_id
+        .iter()
+        .map(|byte| format!("{:08b}", byte))
+        .collect::<String>()
 }
-
-
-

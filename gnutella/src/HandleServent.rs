@@ -1,15 +1,20 @@
 use std::io::prelude::*;
 use std::net::TcpStream;
 
+use crate::HandleClient;
 use crate::InitializeConn;
 use crate::Messages;
-use crate::Pong;
-use crate::HandleClient;
 use crate::PingPath;
+use crate::Pong;
 
 use crate::GLOBAL_PONG_PAYLOAD;
 
-pub fn handle_connection(streams: &mut Vec<Option<TcpStream>>, mut stream: TcpStream, bytes_read: usize, buff: &[u8]) -> Result<(), std::io::Error> {
+pub fn handle_connection(
+    streams: &mut Vec<Option<TcpStream>>,
+    mut stream: TcpStream,
+    bytes_read: usize,
+    buff: &[u8],
+) -> Result<(), std::io::Error> {
     let mut current_buffer = &buff[..bytes_read];
 
     while !current_buffer.is_empty() {
@@ -24,10 +29,9 @@ pub fn handle_connection(streams: &mut Vec<Option<TcpStream>>, mut stream: TcpSt
             None => break, // Invalid header, stop processing
         };
 
-        if response1.get_payload_descriptor()==&Messages::Payload_type::Connect{
+        if response1.get_payload_descriptor() == &Messages::Payload_type::Connect {
             InitializeConn::accept_conn(stream.try_clone()?);
             return Ok(());
-
         }
 
         // Calculate total message length
@@ -40,7 +44,7 @@ pub fn handle_connection(streams: &mut Vec<Option<TcpStream>>, mut stream: TcpSt
         // }
 
         // Extract payload
-        
+
         let payload_buff = &current_buffer[23..total_message_length];
 
         // Process message based on type
@@ -48,13 +52,15 @@ pub fn handle_connection(streams: &mut Vec<Option<TcpStream>>, mut stream: TcpSt
         match response1.get_payload_descriptor() {
             Messages::Payload_type::Ping => {
                 handle_ping_message(streams, &mut stream, &response1, payload_buff)?;
-            },
+            }
             Messages::Payload_type::Pong => {
                 handle_pong_message(&mut stream, &response1, payload_buff)?;
-            },
-            Messages::Payload_type::Connect|Messages::Payload_type::Push | Messages::Payload_type::Query | Messages::Payload_type::Query_Hit => todo!()
+            }
+            Messages::Payload_type::Connect
+            | Messages::Payload_type::Push
+            | Messages::Payload_type::Query
+            | Messages::Payload_type::Query_Hit => todo!(),
         }
-    
 
         // Move to the next message in the buffer
         current_buffer = &current_buffer[total_message_length..];
@@ -64,10 +70,10 @@ pub fn handle_connection(streams: &mut Vec<Option<TcpStream>>, mut stream: TcpSt
 }
 
 fn handle_ping_message(
-    streams: &mut Vec<Option<TcpStream>>, 
-    current_stream: &mut TcpStream, 
+    streams: &mut Vec<Option<TcpStream>>,
+    current_stream: &mut TcpStream,
     header: &Messages::Header,
-    payload_buff: &[u8]
+    payload_buff: &[u8],
 ) -> Result<(), std::io::Error> {
     let id = header.get_descriptor_id();
     let ttl = header.get_hops() + 2;
@@ -80,16 +86,16 @@ fn handle_ping_message(
     // Forward ping if TTL allows
     if header.get_ttl() != 0 {
         PingPath::add_ping_path(Some(current_stream.try_clone()?), id.clone());
-        
+
         for stream_option in streams.iter_mut() {
             if let Some(stream1) = stream_option {
                 if let (Ok(addr1), Ok(addr2)) = (stream1.peer_addr(), current_stream.peer_addr()) {
                     if addr1 != addr2 {
                         HandleClient::send_ping(
-                            stream1, 
-                            id.clone(), 
-                            header.get_ttl() - 1, 
-                            header.get_hops() + 1
+                            stream1,
+                            id.clone(),
+                            header.get_ttl() - 1,
+                            header.get_hops() + 1,
                         );
                     }
                 }
@@ -101,25 +107,28 @@ fn handle_ping_message(
 }
 
 fn handle_pong_message(
-    current_stream: &mut TcpStream, 
+    current_stream: &mut TcpStream,
     header: &Messages::Header,
-    payload_buff: &[u8]
+    payload_buff: &[u8],
 ) -> Result<(), std::io::Error> {
-    println!("Pong message: {:?}", Pong::Pong_Payload::from_bytes(payload_buff));
+    println!(
+        "Pong message: {:?}",
+        Pong::Pong_Payload::from_bytes(payload_buff)
+    );
     // println!("Stream: {:?}", current_stream);
 
     let reverse_stream = PingPath::get_stream_by_id(header.get_descriptor_id());
-    if header.get_ttl() !=0{
-    if let Some(mut reverse_stream) = reverse_stream {
-        // println!("Pong reverse stream: {:?}", reverse_stream);
-        Pong::send_pong(
-            &mut reverse_stream,
-            payload_buff.to_vec(),
-            &header.get_descriptor_id(),
-            &(header.get_ttl() - 1),
-            header.get_hops() + 1
-        );
-    }
+    if header.get_ttl() != 0 {
+        if let Some(mut reverse_stream) = reverse_stream {
+            // println!("Pong reverse stream: {:?}", reverse_stream);
+            Pong::send_pong(
+                &mut reverse_stream,
+                payload_buff.to_vec(),
+                &header.get_descriptor_id(),
+                &(header.get_ttl() - 1),
+                header.get_hops() + 1,
+            );
+        }
     }
     Ok(())
 }
