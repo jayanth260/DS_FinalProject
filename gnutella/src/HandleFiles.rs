@@ -19,7 +19,6 @@ impl PathValidator {
         
         for path_str in paths {
             let path = Path::new(path_str);
-            
             if path.exists() && path.is_file() {
                 match File::open(path) {
                     Ok(_) => {
@@ -76,11 +75,36 @@ impl PathValidator {
     }
     
     // check if a specific file path is in the list of shared paths.
-    pub fn is_file_shared(file_path: &str) -> bool {
-        if let Ok(shared_files) = SHARED_FILES.lock() {
-            shared_files.contains(&file_path.to_string())
+    // pub fn is_file_shared(file_path: &str) -> bool {
+    //     if let Ok(shared_files) = SHARED_FILES.lock() {
+    //         shared_files.contains(&file_path.to_string())
+    //     } else {
+    //         false
+    //     }
+    // }
+  
+
+pub fn is_file_shared(file_path: &str) -> Option<(usize, u32)> {
+    // Extract the filename from the full path
+    let filename = file_path.split('/').last().unwrap_or(file_path);
+
+    if let Ok(shared_files) = SHARED_FILES.lock() {
+        // Find the position of the first shared file that matches the given filename
+        if let Some(index) = shared_files.iter().position(|shared_file| {
+            shared_file.split('/').last().unwrap_or(shared_file) == filename
+        }) {
+            // Get the size of the file in bytes
+            let size = fs::metadata(&shared_files[index])
+                .map(|metadata| metadata.len())
+                .unwrap_or(0); // Use 0 if metadata fails
+            Some((size.try_into().unwrap(),index.try_into().unwrap() ))
         } else {
-            false
+            None
         }
+    } else {
+        None // Return None if unable to acquire the lock
     }
+}
+
+    
 }

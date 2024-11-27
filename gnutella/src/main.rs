@@ -5,16 +5,24 @@ use std::io::{self, ErrorKind};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::{thread, time};
+use std::collections::HashMap;
+use lazy_static::lazy_static;
 // use std::sync::Mutex;
 use uuid::Uuid;
-
+ 
+pub mod HandleFiles;
 mod HandleServent;
 pub mod HandleClient;
-mod HandleServent;
 pub mod InitializeConn;
 mod Messages;
 pub mod Pong;
-mod Messages;
+pub mod Query;
+pub mod QueryHit;
+
+lazy_static! {
+    pub static ref GLOBAL_QUERYHIT_PAYLOADS: Mutex<HashMap<String, Vec<QueryHit::QueryHit_Payload>>> = 
+        Mutex::new(HashMap::new());
+}
 
 pub static SERVENT_ID:Lazy<Uuid> = Lazy::new(|| {
     Uuid::new_v4()
@@ -29,20 +37,20 @@ pub static GLOBAL_PONG_PAYLOAD: Lazy<Mutex<Pong::Pong_Payload>> = Lazy::new(|| {
     })
 });
 
-pub struct PingPath {
+pub struct MessagePath {
     stream: Option<TcpStream>,
     id: String,
 }
 
-static PING_PATHS: Lazy<Mutex<Vec<PingPath>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static Message_Paths: Lazy<Mutex<Vec<MessagePath>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
-impl PingPath {
+impl MessagePath {
     pub fn add_ping_path(stream: Option<TcpStream>, id: String) {
-        let mut paths = PING_PATHS.lock().unwrap(); // Lock the mutex
-        paths.push(PingPath { stream, id });
+        let mut paths = Message_Paths.lock().unwrap(); // Lock the mutex
+        paths.push(MessagePath { stream, id });
     }
     pub fn get_stream_by_id(id: &String) -> Option<TcpStream> {
-        let paths = PING_PATHS.lock().unwrap(); // Lock the mutex
+        let paths = Message_Paths.lock().unwrap(); // Lock the mutex
         for path in paths.iter() {
             if path.id == *id {
                 // Attempt to clone the stream if it exists
@@ -164,10 +172,14 @@ fn main() -> std::io::Result<()> {
             match TcpStream::connect(args[2].clone()) {
                 Ok(mut stream) => {
                     // let stream_dup=stream.try_clone();
-                    HandleClient::handle_requests(&mut stream);
+                    let stream_temp=stream.try_clone();
                     if let Ok(mut streams) = streams_clone2.lock() {
-                        streams.push(Some(stream));
+                        streams.push(Some(stream_temp.expect("REASON")));
                     }
+                    
+
+                    HandleClient::handle_requests(&mut stream,streams_clone2);
+                    
                 }
                 Err(e) => {
                     eprintln!("Failed to connect to {}: {}", args[2], e);
@@ -175,12 +187,13 @@ fn main() -> std::io::Result<()> {
             }
         }
     });
-    handle.join().unwrap();
+    
+    
     // handle incoming connections
     for stream in handle_listener.incoming() {
         match stream {
             Ok(stream) => {
-                println!("New connection: {:?}", stream);
+                // println!("New connection: {:?}", stream);
                 if let Ok(mut streams) = streams_clone1.lock() {
                     streams.push(Some(stream));
                 }
@@ -192,7 +205,7 @@ fn main() -> std::io::Result<()> {
     }
 
     checker_handle.join().unwrap();
-
+    handle.join().unwrap();
     println!("Exiting...");
     Ok(())
 }

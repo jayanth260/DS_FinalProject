@@ -11,11 +11,15 @@ use lazy_static::lazy_static;
 use crate::HandleClient;
 use crate::InitializeConn;
 use crate::Messages;
-use crate::PingPath;
+use crate::MessagePath;
 use crate::Pong;
+use crate::Query;
+use crate::QueryHit;
 
 use crate::GLOBAL_PONG_PAYLOAD;
 use crate::SERVENT_ID;
+use crate::GLOBAL_QUERYHIT_PAYLOADS;
+
 
 pub struct PongLogger;
 
@@ -116,10 +120,14 @@ pub fn handle_connection(
             Messages::Payload_type::Pong => {
                 handle_pong_message(&mut stream, &response1, payload_buff)?;
             }
+            Messages::Payload_type::Query=>{
+                handle_query_message(streams, &mut stream, &response1, payload_buff)?;
+            }
+            Messages::Payload_type::Query_Hit=>{
+                handle_queryhit_message(&mut stream, &response1, payload_buff)?;
+            }
             Messages::Payload_type::Connect
-            | Messages::Payload_type::Push
-            | Messages::Payload_type::Query
-            | Messages::Payload_type::Query_Hit => todo!(),
+            | Messages::Payload_type::Push => todo!(),
         }
 
         // Move to the next message in the buffer
@@ -128,6 +136,72 @@ pub fn handle_connection(
 
     Ok(())
 }
+
+fn handle_query_message(
+    streams: &mut Vec<Option<TcpStream>>,
+    current_stream: &mut TcpStream,
+    header: &Messages::Header,
+    payload_buff: &[u8],
+) -> Result<(), std::io::Error> {
+    let id = header.get_descriptor_id();
+    let ttl = header.get_hops() + 2;
+
+    
+    let search_result=Query::search(Query::Query_Payload::from_bytes(payload_buff));
+
+    // println!("{:?}", search_result);
+    if let Some(search_results) = search_result {
+        // Process the results into QueryHit::FileResult
+        let results: Vec<QueryHit::FileResult> = search_results.into_iter().map(|(file_index, file_size, file_name)| {
+            QueryHit::FileResult {
+                file_index,
+                file_size,
+                file_name,
+            }
+        }).collect();
+
+        if !results.is_empty() {
+            if let Ok(pong_payload) = GLOBAL_PONG_PAYLOAD.lock() {
+                let payload = QueryHit::QueryHit_Payload::new(
+                    results.len().try_into().unwrap(),
+                    pong_payload.Port.clone(),
+                    pong_payload.Ip.clone(),
+                    300,
+                    results,
+                );
+
+                QueryHit::send_queryhit(current_stream, &payload, id, ttl, 0);
+            }
+        }
+    }
+    
+
+   
+
+    // Forward ping if TTL allows
+    if header.get_ttl() != 0 {
+        MessagePath::add_ping_path(Some(current_stream.try_clone()?), id.clone());
+
+        for stream_option in streams.iter_mut() {
+            if let Some(stream1) = stream_option {
+                if let (Ok(addr1), Ok(addr2)) = (stream1.peer_addr(), current_stream.peer_addr()) {
+                    if addr1 != addr2 {
+                        Query::send_query(
+                            stream1,
+                            &Query::Query_Payload::from_bytes(payload_buff),
+                            &id.clone(),
+                            header.get_ttl() - 1,
+                            header.get_hops() + 1,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 
 fn handle_ping_message(
     streams: &mut Vec<Option<TcpStream>>,
@@ -145,7 +219,7 @@ fn handle_ping_message(
 
     // Forward ping if TTL allows
     if header.get_ttl() != 0 {
-        PingPath::add_ping_path(Some(current_stream.try_clone()?), id.clone());
+        MessagePath::add_ping_path(Some(current_stream.try_clone()?), id.clone());
 
         for stream_option in streams.iter_mut() {
             if let Some(stream1) = stream_option {
@@ -171,13 +245,13 @@ fn handle_pong_message(
     header: &Messages::Header,
     payload_buff: &[u8],
 ) -> Result<(), std::io::Error> {
-    println!(
-        "Pong message: {:?}",
-        Pong::Pong_Payload::from_bytes(payload_buff)
-    );
+    // println!(
+    //     "Pong message: {:?}",
+    //     Pong::Pong_Payload::from_bytes(payload_buff)
+    // );
     // println!("Stream: {:?}", current_stream);
 
-    let reverse_stream = PingPath::get_stream_by_id(header.get_descriptor_id());
+    let reverse_stream = MessagePath::get_stream_by_id(header.get_descriptor_id());
     if header.get_ttl() !=0{
     if let Some(mut reverse_stream) = reverse_stream {
         // println!("Pong reverse stream: {:?}", reverse_stream);
@@ -192,6 +266,50 @@ fn handle_pong_message(
     else{
         // println!("writing");
         PongLogger::thread_safe_log_pong(&Pong::Pong_Payload::from_bytes(payload_buff));
+    }
+    
+    }
+    Ok(())
+}
+
+
+fn handle_queryhit_message(
+    current_stream: &mut TcpStream,
+    header: &Messages::Header,
+    payload_buff: &[u8],
+) -> Result<(), std::io::Error> {
+    
+    // println!("Stream: {:?}", current_stream);
+
+    let reverse_stream = MessagePath::get_stream_by_id(header.get_descriptor_id());
+    if header.get_ttl() !=0{
+    if let Some(mut reverse_stream) = reverse_stream {
+        // println!("Pong reverse stream: {:?}", reverse_stream);
+        QueryHit::send_queryhit(
+            &mut reverse_stream,
+            &QueryHit::QueryHit_Payload::from_bytes(payload_buff),
+            &header.get_descriptor_id(),
+            header.get_ttl() - 1,
+            header.get_hops() + 1
+        );
+    }
+    else{
+        // handle downloads
+        // PongLogger::thread_safe_log_pong(&Pong::Pong_Payload::from_bytes(payload_buff));
+        // println!(
+        //     "Queryhit : {:?}",
+        //     QueryHit::QueryHit_Payload::from_bytes(payload_buff)
+        // );
+        let header_id = header.get_descriptor_id();
+    
+        // Update the global HashMap with the new payload
+        if let Ok(mut global_queryhit_map) = GLOBAL_QUERYHIT_PAYLOADS.lock() {
+            global_queryhit_map
+                .entry(header_id.clone())
+                .or_insert_with(Vec::new)
+                .push(QueryHit::QueryHit_Payload::from_bytes(payload_buff).clone());
+        }
+        
     }
     
     }
