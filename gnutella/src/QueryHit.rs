@@ -4,6 +4,7 @@ use std::net::TcpStream;
 use crate::Messages;
 
 use crate::SERVENT_ID;
+// use crate::total_count;
 
 #[derive(Debug, Clone)]
 pub struct FileResult {
@@ -176,6 +177,9 @@ impl QueryHit_Payload {
 }
 
 pub fn send_queryhit(stream: &mut TcpStream, payload: &QueryHit_Payload, id: &String, ttl: u8, hops: u8){
+    // if let Ok(mut Count) = total_count.lock() {
+    //     *Count+=1;
+    // }
     let payload_bytes = payload.to_bytes();
 
     let header_bytes = Messages::Header::new(

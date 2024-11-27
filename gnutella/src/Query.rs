@@ -2,6 +2,7 @@ use std::io::prelude::*;
 use std::net::TcpStream;
 use crate::Messages;
 use crate::HandleFiles;
+// use crate::total_count;
 
 #[derive(Debug)]
 pub struct Query_Payload {
@@ -52,6 +53,10 @@ impl Query_Payload {
 
 pub fn send_query(stream: &mut TcpStream, payload: &Query_Payload, id: &String, ttl: u8, hops: u8) {
     // println!("{:?},{:?}",stream,payload);
+    
+    // if let Ok(mut Count) = total_count.lock() {
+    //     *Count+=1;
+    // }
     let payload_bytes = payload.to_bytes();
     // println!("sending qeury");
 
