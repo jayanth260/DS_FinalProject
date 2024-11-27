@@ -33,6 +33,11 @@ pub static SERVENT_ID:Lazy<Uuid> = Lazy::new(|| {
     Uuid::new_v4()
 });
 
+// lazy_static! {
+//     #[derive(Debug)]
+//     pub static ref total_count: Mutex<u32> = Mutex::new(0);
+//     pub static ref query_hit: Mutex<u32> = Mutex::new(0);
+// }
 pub static GLOBAL_PONG_PAYLOAD: Lazy<Mutex<Pong::Pong_Payload>> = Lazy::new(|| {
     Mutex::new(Pong::Pong_Payload {
         Port: String::new(),
@@ -80,7 +85,7 @@ fn check_streams(streams: &mut Vec<Option<TcpStream>>) -> Result<(), std::io::Er
             // Set non-blocking mode
             stream.set_nonblocking(true)?;
 
-            let mut buff = [0; 1024];
+            let mut buff = [0; 2048];
             match stream.read(&mut buff) {
                 Ok(bytes_read) if bytes_read > 0 => {
                     if let Ok(stream_clone) = stream.try_clone() {
@@ -256,7 +261,7 @@ fn main() -> std::io::Result<()> {
                     }
                     
 
-                    HandleClient::handle_requests(&mut stream,streams_clone2);
+                    HandleClient::handle_requests(Some(&mut stream),streams_clone2);
                     
                 }
                 Err(e) => {
@@ -264,6 +269,12 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
+        else{
+            HandleClient::handle_requests(None,streams_clone2);
+
+
+        }
+        
     });
     
     

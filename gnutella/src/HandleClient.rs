@@ -10,6 +10,17 @@ use crate::Query;
 use uuid::Uuid;
 use prettytable::row;
 use crate::QueryHit;
+// use crate::total_count;
+// use crate::query_hit;
+
+// const files: [&str; 15]=["file1.txt","file2.txt","file3.txt","file4.txt","file5.txt","file6.txt","file7.txt","file8.txt",
+// "file9.txt",
+// "file10.txt",
+// "file11.txt",
+// "file12.txt",
+// "file13.txt",
+// "file14.txt",
+// "file15.txt"];
 
 
 use crate::GLOBAL_QUERYHIT_PAYLOADS;
@@ -92,10 +103,12 @@ pub fn clear_all_queryhits() {
 
 
 pub fn handle_requests(
-    stream: &mut TcpStream,
+    stream:Option<&mut TcpStream>,
     streams: Arc<Mutex<Vec<Option<TcpStream>>>>
 ) -> io::Result<()> {
     // Send a connection request
+    match stream{
+        Some(stream)=>{
     let response = InitializeConn::request_conn(stream)?;
     
     // Check if server accepts connection
@@ -192,25 +205,42 @@ pub fn handle_requests(
                         }
                     }
 
-                    
-                    // Optional: Wait for user to continue
-                    print!("\nPress Enter to continue...");
-                    io::stdout().flush().unwrap();
-                    let mut pause = String::new();
-                    io::stdin().read_line(&mut pause).unwrap();
-                }
-                "2" => {
-                    println!("Exiting...");
-                    break;
-                }
-                _ => {
-                    println!("❌ Invalid option. Please choose 1 or 2.");
-                }
+            
+            // Optional: Wait for user to continue
+            print!("\nPress Enter to continue...");
+            io::stdout().flush().unwrap();
+            let mut pause = String::new();
+            io::stdin().read_line(&mut pause).unwrap();
+        }
+        "2" => {
+            println!("Exiting...");
+            // if let Ok(mut Count) = total_count.lock() {
+            //     println!("{:?}",*Count);
+            // }
+            
+            // if let Ok(queryhit_map) = GLOBAL_QUERYHIT_PAYLOADS.lock() {
+            //     // Count the number of unique header IDs
+            //     println!("{:?}",queryhit_map.keys().count()); // This counts distinct header_ids
+            // } else {
+            //     println!("0"); // Return 0 if the Mutex couldn't be locked
+            // }
+
+            break;
+        }"3"=>{
+            for file in files{
+                let full_search_criteria = ["filename ".to_string(), file.to_string()].concat();
+            let query_payload = Query::Query_Payload::new(full_search_criteria, 250);
+            send_query_to_all_streams(&streams, &query_payload);
+            thread::sleep(Duration::from_millis(5000));   
             }
         }
-    } else {
-        println!("❌ Connection unsuccessful. Check server status.");
-    }
+        _ => {
+            println!("❌ Invalid option. Please choose 1 or 2.");
+        }
+        
+    
+}
+}
     Ok(())
 }
 
@@ -220,6 +250,12 @@ pub fn send_ping(
     ttl: u8,
     hops: u8,
 ) -> Result<(), std::io::Error> {
+
+    // if let Ok(mut Count) = total_count.lock() {
+    //     *Count+=1;
+    // }
+    
+    
     let ping_header = Messages::Header::new(id, Messages::Payload_type::Ping, ttl, hops, 0);
     let ping_header_bytes = ping_header.to_bytes();
     stream.write_all(&ping_header_bytes)?;
@@ -246,7 +282,7 @@ pub fn send_query_to_all_streams(
             match stream.try_clone() {
                 Ok(mut stream_clone) => {
                     // Send query with the same descriptor ID
-                    Query::send_query(&mut stream_clone, query_payload, &descriptor_id, 3, 0);
+                    Query::send_query(&mut stream_clone, query_payload, &descriptor_id, 2, 0);
                     
                     successful_broadcasts += 1;
                 }
@@ -272,7 +308,7 @@ pub fn send_query_to_all_streams(
     Ok(descriptor_id)
 }
 
-// Utility function to count active streams
+// Utility function to total_count active streams
 fn count_active_streams(
     streams: &Arc<Mutex<Vec<Option<TcpStream>>>>
 ) -> usize {

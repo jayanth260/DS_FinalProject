@@ -3,6 +3,7 @@ use std::net::Ipv4Addr;
 use std::net::TcpStream;
 
 use crate::Messages;
+// use crate::total_count;
 
 #[derive(Debug)]
 pub struct Pong_Payload {
@@ -62,6 +63,9 @@ impl Pong_Payload {
 pub fn send_pong(stream: &mut TcpStream, payload: Vec<u8>, id: &String, ttl: &u8, hops: u8) {
     // println!("{:?}", payload.Port);
     // let payload_bytes= payload.to_bytes();
+    // if let Ok(mut Count) = total_count.lock() {
+    //     *Count+=1;
+    // }
     let header_bytes = Messages::Header::new(
         id.clone(),
         Messages::Payload_type::Pong,
