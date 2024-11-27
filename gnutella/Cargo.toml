@@ -12,6 +12,7 @@ prettytable= "0.10.0"
 tiny_http = "0.12"
 reqwest = { version = "0.11", features = ["blocking"] }
 tokio = { version = "1.0", features = ["full"] }
+local-ip-address = "0.5.1"
 
 [build-dependencies]
 prost-build = "0.13.3"

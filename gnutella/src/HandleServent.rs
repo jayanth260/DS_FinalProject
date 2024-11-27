@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use lazy_static::lazy_static;
 
 
+use crate::HandleFiles::SHARED_FILES;
+use crate::HandleFiles::DOWNLOADED_FILES;
 use crate::HandleClient;
 use crate::InitializeConn;
 use crate::Messages;
@@ -21,6 +23,8 @@ use crate::HandleFiles;
 use crate::GLOBAL_PONG_PAYLOAD;
 use crate::SERVENT_ID;
 use crate::GLOBAL_QUERYHIT_PAYLOADS;
+use crate::TcpListener;
+
 
 
 pub struct PongLogger;
@@ -327,42 +331,229 @@ fn handle_push_message(
 ) -> Result<(), std::io::Error> {
     let push_payload = Push::Push_Payload::from_bytes(payload_buff);
     
-    // Convert our UUID to binary string using ALL bytes
     let our_id_binary = SERVENT_ID.as_bytes()
         .iter()
         .map(|&byte| format!("{:08b}", byte))
         .collect::<String>();
     
-    println!("🔄 Received Push message with Servent ID: {}", push_payload.Servent_id);
-    println!("🆔 Our Servent ID (binary): {}", our_id_binary);
-    
     if push_payload.Servent_id == our_id_binary {
         println!("✅ Push request is for us!");
-        println!("📥 Received Push request from {}:{}", push_payload.Ip_address, push_payload.Port);
         
-        let mut file_found = false;
+        // First check if this is a cached file
+        let (file_path, original_metadata) = if push_payload.file_index >= 1000 {
+            // Check downloaded/cached files
+            if let Ok(downloaded_files) = DOWNLOADED_FILES.lock() {
+                let cache_index = (push_payload.file_index - 1000) as usize;
+                if let Some(metadata) = downloaded_files.get(cache_index) {
+                    (Some(metadata.file_path.clone()), Some(metadata.clone()))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            }
+        } else {
+            // Check original shared files
+            if let Ok(shared_files) = SHARED_FILES.lock() {
+                (shared_files.get(push_payload.file_index as usize)
+                    .map(|s| s.to_string()), None)
+            } else {
+                (None, None)
+            }
+        };
 
-        // First check original shared files
-        if let Ok(shared_files) = HandleFiles::SHARED_FILES.lock() {
-            if let Some(file_path) = shared_files.get(push_payload.file_index as usize) {
-                file_found = true;
-                handle_file_transfer(file_path, &push_payload)?;
+        if let Some(file_path) = file_path {
+            println!("📂 Found requested file: {}", file_path);
+            
+            // When handling a cache validation request (Node C's response)
+            if push_payload.is_cache_check {
+                println!("📝 Processing cache validation request");
+                if let Ok(metadata) = std::fs::metadata(&file_path) {
+                    if let Ok(modified_time) = metadata.modified() {
+                        let our_modified = modified_time
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        
+                        // Connect back to Node B's validation port
+                        if let Ok(mut transfer_stream) = TcpStream::connect(format!("{}:{}", 
+                            push_payload.Ip_address, push_payload.Port)) {  // Use the validation port!
+                            
+                            println!("✅ Connected back to cache holder for validation response");
+                            
+                            if our_modified > push_payload.cache_modified_time {
+                                println!("🔄 Cache is outdated, sending updated file");
+                                // Send the updated file
+                                if let Ok(content) = std::fs::read(&file_path) {
+                                    let response = format!(
+                                        "HTTP/1.0 200 OK\r\n\
+                                        Content-Type: application/octet-stream\r\n\
+                                        Content-Length: {}\r\n\
+                                        Server: Gnutella\r\n\
+                                        \r\n",
+                                        content.len()
+                                    );
+                                    transfer_stream.write_all(response.as_bytes())?;
+                                    transfer_stream.write_all(&content)?;
+                                }
+                            } else {
+                                println!("✅ Cache is up to date");
+                                let response = "HTTP/1.0 304 Not Modified\r\n\
+                                    X-Cache-Status: current\r\n\
+                                    Server: Gnutella\r\n\
+                                    \r\n";
+                                transfer_stream.write_all(response.as_bytes())?;
+                            }
+                        }
+                    }
+                }
+                return Ok(());
+            }
+            
+            // Node B's logic
+            if let Some(metadata) = original_metadata {
+                if !push_payload.is_cache_check {
+                    println!("🔄 Validating cache with original source...");
+                    
+                    // Start listening for response from original source
+                    let listener = TcpListener::bind("127.0.0.1:0")?;
+                    let local_addr = listener.local_addr()?;
+                    println!("🌐 Listening on port {} for cache validation", local_addr.port());
+                    
+                    // Send validation request to C
+                    if let Ok(mut original_stream) = TcpStream::connect(
+                        format!("{}:{}", metadata.original_host, metadata.original_port)
+                    ) {
+                        println!("✅ Connected to original source for validation");
+                        
+                        let validation_payload = Push::Push_Payload {
+                            Servent_id: metadata.original_servent_id.clone(),
+                            file_index: metadata.original_index,
+                            Ip_address: "127.0.0.1".to_string(),
+                            Port: local_addr.port().to_string(),
+                            is_cache_check: true,
+                            cache_modified_time: std::fs::metadata(&file_path)
+                                .and_then(|m| m.modified())
+                                .map(|t| t.duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs())
+                                .unwrap_or(0),
+                            requesting_ip: "127.0.0.1".to_string(),
+                            requesting_port: local_addr.port().to_string(),
+                        };
+                        
+                        Push::send_push(
+                            &mut original_stream,
+                            &validation_payload,
+                            &Messages::generate_desid(),
+                            7,
+                            0
+                        );
+
+                        // Wait for validation response from C
+                        if let Ok((mut transfer_stream, _)) = listener.accept() {
+                            println!("📥 Received validation response from original source");
+                            
+                            let mut buffer = [0; 1024];
+                            let mut response = Vec::new();
+                            
+                            loop {
+                                match transfer_stream.read(&mut buffer) {
+                                    Ok(0) => break,
+                                    Ok(n) => response.extend_from_slice(&buffer[..n]),
+                                    Err(e) => {
+                                        println!("❌ Error reading validation response: {}", e);
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            let response_str = String::from_utf8_lossy(&response);
+                            println!("🔍 Response from C: {}", response_str); // Log the response
+
+                            if response_str.contains("200 OK") {
+                                // Update cache with new content
+                                if let Some(body_start) = response.windows(4)
+                                    .position(|window| window == b"\r\n\r\n") {
+                                    let content = &response[body_start + 4..];
+                                    if !content.is_empty() {
+                                        std::fs::write(&file_path, content)?;
+                                        println!("✅ Cache updated with new content");
+                                    }
+                                }
+                            } else {
+                                println!("✅ Cache is already up to date");
+                            }
+                        } else {
+                            println!("❌ Failed to receive response from original source");
+                        }
+                    } else {
+                        println!("❌ Failed to connect to original source");
+                    }
+
+                    // After validation, send file to A in a separate connection
+                    println!("📤 Sending file to original requester");
+                    if let Ok(mut requester_stream) = TcpStream::connect(format!("{}:{}", 
+                        push_payload.Ip_address, push_payload.Port)) {
+                        
+                        // Read the file content
+                        if let Ok(content) = std::fs::read(&file_path) {
+                            let mut buffer = [0; 1024];
+                            requester_stream.read(&mut buffer)?;  // Read HTTP GET request
+                            
+                            // Send file with 200 OK
+                            let file_response = format!(
+                                "HTTP/1.0 200 OK\r\n\
+                                Content-Type: application/octet-stream\r\n\
+                                Content-Length: {}\r\n\
+                                Server: Gnutella\r\n\
+                                \r\n",
+                                content.len()
+                            );
+                            
+                            requester_stream.write_all(file_response.as_bytes())?;
+                            requester_stream.write_all(&content)?;
+                            println!("✅ File sent successfully to requester ({} bytes)", content.len());
+                        } else {
+                            println!("❌ Failed to read file content");
+                        }
+                    } else {
+                        println!("❌ Failed to connect to requester");
+                    }
+                }
+            }
+            
+            // Now send the file (either original or updated cache)
+            if let Ok(mut transfer_stream) = TcpStream::connect(format!("{}:{}", 
+                push_payload.Ip_address, push_payload.Port)) {
+                println!("✅ Connected to requester at {}:{}", 
+                    push_payload.Ip_address, push_payload.Port);
+                
+                // Read the latest version of the file
+                if let Ok(content) = std::fs::read(&file_path) {
+                    let mut buffer = [0; 1024];
+                    transfer_stream.read(&mut buffer)?;
+                    
+                    let response = format!(
+                        "HTTP/1.0 200 OK\r\n\
+                        Content-Type: application/octet-stream\r\n\
+                        Content-Length: {}\r\n\
+                        Server: Gnutella\r\n\
+                        \r\n",
+                        content.len()
+                    );
+                    
+                    transfer_stream.write_all(response.as_bytes())?;
+                    transfer_stream.write_all(&content)?;
+                    println!("✅ File sent successfully ({} bytes)", content.len());
+                }
+            } else {
+                println!("❌ Failed to connect to requester");
             }
         }
-
-        // If not found in shared files, check downloaded files
-        if !file_found && push_payload.file_index >= 1000 {
-            if let Some(metadata) = HandleFiles::PathValidator::get_file_metadata(push_payload.file_index) {
-                file_found = true;
-                handle_file_transfer(&metadata.file_path, &push_payload)?;
-            }
-        }
-
-        if !file_found {
-            println!("❌ File index {} not found", push_payload.file_index);
-        }
+        
+        Ok(())
     } else {
-        println!("➡️ Push request is not for us (ID mismatch)");
         // Forward the Push message if TTL allows
         if header.get_ttl() != 0 {
             let reverse_stream = MessagePath::get_stream_by_id(header.get_descriptor_id());
@@ -376,9 +567,8 @@ fn handle_push_message(
                 );
             }
         }
+        Ok(())
     }
-    
-    Ok(())
 }
 
 // Helper function to handle the actual file transfer

@@ -11,6 +11,10 @@ pub struct Push_Payload {
     pub file_index: u32,
     pub Ip_address: String,
     pub Port: String,
+    pub is_cache_check: bool,
+    pub cache_modified_time: u64,
+    pub requesting_ip: String,
+    pub requesting_port: String,
 }
 
 impl Push_Payload {
@@ -40,6 +44,17 @@ impl Push_Payload {
         let port_num: u16 = self.Port.parse().unwrap_or(0);
         bytes.extend_from_slice(&port_num.to_be_bytes());
         
+        // Add new fields
+        bytes.push(self.is_cache_check as u8);
+        bytes.extend_from_slice(&self.cache_modified_time.to_be_bytes());
+        
+        for octet in self.requesting_ip.split('.') {
+            bytes.push(octet.parse::<u8>().unwrap_or(0));
+        }
+        
+        let req_port_num: u16 = self.requesting_port.parse().unwrap_or(0);
+        bytes.extend_from_slice(&req_port_num.to_be_bytes());
+        
         bytes
     }
 
@@ -53,12 +68,23 @@ impl Push_Payload {
         let file_index = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
         let ip_address = format!("{}.{}.{}.{}", bytes[20], bytes[21], bytes[22], bytes[23]);
         let port = format!("{}", u16::from_be_bytes([bytes[24], bytes[25]]));
+        let is_cache_check = bytes[26] != 0;
+        let cache_modified_time = u64::from_be_bytes([
+            bytes[27], bytes[28], bytes[29], bytes[30],
+            bytes[31], bytes[32], bytes[33], bytes[34]
+        ]);
+        let requesting_ip = format!("{}.{}.{}.{}", bytes[35], bytes[36], bytes[37], bytes[38]);
+        let requesting_port = format!("{}", u16::from_be_bytes([bytes[39], bytes[40]]));
 
         Push_Payload {
             Servent_id: servent_id,
             file_index,
             Ip_address: ip_address,
             Port: port,
+            is_cache_check,
+            cache_modified_time,
+            requesting_ip,
+            requesting_port,
         }
     }
 
@@ -76,7 +102,11 @@ impl Push_Payload {
             Servent_id: self.Servent_id.clone(),
             file_index: self.file_index,
             Ip_address: "127.0.0.1".to_string(),
-            Port: local_addr.port().to_string(), // The port we're listening on
+            Port: local_addr.port().to_string(),
+            is_cache_check: self.is_cache_check,
+            cache_modified_time: self.cache_modified_time,
+            requesting_ip: self.requesting_ip.clone(),
+            requesting_port: self.requesting_port.clone(),
         };
         
         // Connect to Gnutella network and send Push request
@@ -84,6 +114,9 @@ impl Push_Payload {
         let mut gnutella_stream = TcpStream::connect(format!("{}:{}", self.Ip_address, self.Port))?;
         Push::send_push(&mut gnutella_stream, &push_payload, &Messages::generate_desid(), 7, 0);
         println!("Push request sent, waiting for file sender to connect...");
+        
+        // Set a timeout for accepting connections
+        listener.set_nonblocking(false)?;
         
         // Wait for the file sender to connect
         match listener.accept() {

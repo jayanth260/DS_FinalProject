@@ -14,6 +14,7 @@ pub struct DownloadedFileMetadata {
     pub original_port: String,
     pub original_index: u32,
     pub file_size: u32,
+    pub original_servent_id: String,
 }
 
 pub static DOWNLOADED_FILES: Lazy<Mutex<Vec<DownloadedFileMetadata>>> = 
@@ -134,7 +135,8 @@ impl PathValidator {
         host: String,
         port: String,
         index: u32,
-        size: u32
+        size: u32,
+        servent_id: String,
     ) -> io::Result<()> {
         let metadata = DownloadedFileMetadata {
             file_path,
@@ -142,6 +144,7 @@ impl PathValidator {
             original_port: port,
             original_index: index,
             file_size: size,
+            original_servent_id: servent_id,
         };
 
         if let Ok(mut downloaded_files) = DOWNLOADED_FILES.lock() {

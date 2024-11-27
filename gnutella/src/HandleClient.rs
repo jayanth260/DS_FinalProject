@@ -147,11 +147,19 @@ pub fn handle_requests(
                   
                             // println!("{:?}",get_queryhits_by_header_id(&header_id));
                             if let Some((selected_hit, selected_file)) = format_query_hits(get_queryhits_by_header_id(&header_id)) {
+                                // Clone the Servent_id to use it in multiple places
+                                let servent_id_clone = selected_hit.Servent_id.clone();
+
+                                // Use the clone for the Push_Payload
                                 let push_payload = Push::Push_Payload {
-                                    Servent_id: selected_hit.Servent_id,
+                                    Servent_id: servent_id_clone.clone(), // Use the clone here
                                     file_index: selected_file.file_index,
                                     Ip_address: selected_hit.Ip_address.clone(),
                                     Port: selected_hit.Port.clone(),
+                                    is_cache_check: false,
+                                    cache_modified_time: 0,
+                                    requesting_ip: "127.0.0.1".to_string(),
+                                    requesting_port: "0".to_string(),
                                 };
                                 
                                 println!("Starting download for file: {}", selected_file.file_name);
@@ -166,7 +174,8 @@ pub fn handle_requests(
                                             selected_hit.Ip_address.clone(),
                                             selected_hit.Port.clone(),
                                             selected_file.file_index,
-                                            selected_file.file_size
+                                            selected_file.file_size,
+                                            servent_id_clone, // Use the clone here
                                         ) {
                                             eprintln!("❌ Failed to store download metadata: {}", e);
                                         }
