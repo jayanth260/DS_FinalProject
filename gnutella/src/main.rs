@@ -9,7 +9,10 @@ use std::collections::HashMap;
 use lazy_static::lazy_static;
 // use std::sync::Mutex;
 use uuid::Uuid;
- 
+use std::net::SocketAddr;
+use tiny_http::{Server, Response, Header};
+use std::thread::spawn;
+
 pub mod HandleFiles;
 mod HandleServent;
 pub mod HandleClient;
@@ -18,10 +21,12 @@ mod Messages;
 pub mod Pong;
 pub mod Query;
 pub mod QueryHit;
+mod Push;
 
 lazy_static! {
     pub static ref GLOBAL_QUERYHIT_PAYLOADS: Mutex<HashMap<String, Vec<QueryHit::QueryHit_Payload>>> = 
         Mutex::new(HashMap::new());
+    static ref HTTP_SERVER: Mutex<Option<Arc<Server>>> = Mutex::new(None);
 }
 
 pub static SERVENT_ID:Lazy<Uuid> = Lazy::new(|| {
@@ -112,6 +117,79 @@ fn check_streams(streams: &mut Vec<Option<TcpStream>>) -> Result<(), std::io::Er
     // Clean up disconnected streams
     streams.retain(|stream| stream.is_some());
 
+    Ok(())
+}
+
+fn start_http_server(port: u16) -> std::io::Result<()> {
+    let addr = format!("0.0.0.0:{}", port);
+    println!("Starting HTTP server on {}", addr);
+    
+    let server = Arc::new(Server::http(&addr).unwrap());
+    
+    // Store Arc<Server> in HTTP_SERVER
+    if let Ok(mut http_server) = HTTP_SERVER.lock() {
+        *http_server = Some(Arc::clone(&server));
+    }
+    
+    let server_clone = Arc::clone(&server);
+    spawn(move || {
+        println!("🌐 HTTP Server started on port {}", port);
+        for mut request in server.incoming_requests() {
+            println!("\n📥 Received HTTP request: {} {}", request.method(), request.url());
+            println!("Headers:");
+            for header in request.headers() {
+                println!("  {}: {}", header.field.as_str(), header.value);
+            }
+
+            let url = request.url().to_string(); // Clone the URL to avoid borrowing issues
+            let path_parts: Vec<&str> = url.split('/').collect();
+            if path_parts.len() >= 4 && path_parts[1] == "get" {
+                let file_index: u32 = path_parts[2].parse().unwrap_or(0);
+                let filename = path_parts[3];
+                println!("📂 Request for file index {} ({})", file_index, filename);
+
+                if let Ok(shared_files) = HandleFiles::SHARED_FILES.lock() {
+                    if let Some(file_path) = shared_files.get(file_index as usize) {
+                        println!("🔍 Found file at: {}", file_path);
+                        match std::fs::read(file_path) {
+                            Ok(content) => {
+                                let content_length = content.len();
+                                println!("📤 Sending {} bytes", content_length);
+                                let response = Response::from_data(content.clone()) // Clone content here
+                                    .with_header(Header::from_bytes(
+                                        "Content-Type",
+                                        "application/binary"
+                                    ).unwrap())
+                                    .with_header(Header::from_bytes(
+                                        "Server",
+                                        "Gnutella"
+                                    ).unwrap())
+                                    .with_header(Header::from_bytes(
+                                        "Content-Length",
+                                        content_length.to_string().as_bytes()
+                                    ).unwrap());
+                                
+                                let filename_clone = filename.clone();
+                                if let Err(e) = request.respond(response) {
+                                    eprintln!("❌ Error sending response: {}", e);
+                                } else {
+                                    println!("✅ File sent successfully: {} ({} bytes)", 
+                                        filename_clone, content_length);
+                                }
+                            },
+                            Err(e) => {
+                                println!("❌ Error reading file: {}", e);
+                            }
+                        }
+                    } else {
+                        println!("❌ File index {} not found", file_index);
+                    }
+                }
+            } else {
+                println!("❌ Invalid request path: {}", request.url());
+            }
+        }
+    });
     Ok(())
 }
 

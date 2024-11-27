@@ -15,6 +15,8 @@ use crate::MessagePath;
 use crate::Pong;
 use crate::Query;
 use crate::QueryHit;
+use crate::Push;
+use crate::HandleFiles;
 
 use crate::GLOBAL_PONG_PAYLOAD;
 use crate::SERVENT_ID;
@@ -120,14 +122,16 @@ pub fn handle_connection(
             Messages::Payload_type::Pong => {
                 handle_pong_message(&mut stream, &response1, payload_buff)?;
             }
-            Messages::Payload_type::Query=>{
+            Messages::Payload_type::Query => {
                 handle_query_message(streams, &mut stream, &response1, payload_buff)?;
             }
-            Messages::Payload_type::Query_Hit=>{
+            Messages::Payload_type::Query_Hit => {
                 handle_queryhit_message(&mut stream, &response1, payload_buff)?;
             }
-            Messages::Payload_type::Connect
-            | Messages::Payload_type::Push => todo!(),
+            Messages::Payload_type::Push => {
+                handle_push_message(&mut stream, &response1, payload_buff)?;
+            }
+            Messages::Payload_type::Connect => todo!(),
         }
 
         // Move to the next message in the buffer
@@ -313,5 +317,104 @@ fn handle_queryhit_message(
     }
     
     }
+    Ok(())
+}
+
+fn handle_push_message(
+    current_stream: &mut TcpStream,
+    header: &Messages::Header,
+    payload_buff: &[u8],
+) -> Result<(), std::io::Error> {
+    let push_payload = Push::Push_Payload::from_bytes(payload_buff);
+    
+    // Convert our UUID to binary string using ALL bytes
+    let our_id_binary = SERVENT_ID.as_bytes()
+        .iter()
+        .map(|&byte| format!("{:08b}", byte))
+        .collect::<String>();
+    
+    println!("🔄 Received Push message with Servent ID: {}", push_payload.Servent_id);
+    println!("🆔 Our Servent ID (binary): {}", our_id_binary);
+    
+    if push_payload.Servent_id == our_id_binary {
+        println!("✅ Push request is for us!");
+        println!("📥 Received Push request from {}:{}", push_payload.Ip_address, push_payload.Port);
+        
+        if let Ok(shared_files) = HandleFiles::SHARED_FILES.lock() {
+            if let Some(file_path) = shared_files.get(push_payload.file_index as usize) {
+                let filename = file_path
+                    .split('/')
+                    .last()
+                    .unwrap_or(file_path)
+                    .to_string();
+                
+                println!("🔍 Found file: {} (index: {})", filename, push_payload.file_index);
+                println!("📤 Connecting to requester at {}:{}", push_payload.Ip_address, push_payload.Port);
+                
+                // Connect to requester and send file
+                if let Ok(mut stream) = TcpStream::connect(format!("{}:{}", 
+                    push_payload.Ip_address, push_payload.Port)) {
+                    println!("✅ Connected to requester, waiting for HTTP request");
+                    
+                    // Read HTTP request
+                    let mut request = Vec::new();
+                    let mut buffer = [0; 1024];
+                    
+                    match stream.read(&mut buffer) {
+                        Ok(n) => {
+                            request.extend_from_slice(&buffer[..n]);
+                            println!("📥 Received HTTP request:\n{}", String::from_utf8_lossy(&request));
+                            
+                            // Read the file
+                            match std::fs::read(file_path) {
+                                Ok(file_content) => {
+                                    // Send HTTP response with file
+                                    let response = format!(
+                                        "HTTP/1.0 200 OK\r\n\
+                                        Content-Type: application/octet-stream\r\n\
+                                        Content-Length: {}\r\n\
+                                        Server: Gnutella\r\n\
+                                        \r\n",
+                                        file_content.len()
+                                    );
+                                    
+                                    println!("📤 Sending response header:\n{}", response);
+                                    stream.write_all(response.as_bytes())?;
+                                    stream.write_all(&file_content)?;
+                                    println!("✅ File sent successfully ({} bytes)", file_content.len());
+                                },
+                                Err(e) => {
+                                    println!("❌ Failed to read file: {}", e);
+                                    let error_response = "HTTP/1.0 404 Not Found\r\n\r\n";
+                                    stream.write_all(error_response.as_bytes())?;
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            println!("❌ Failed to read HTTP request: {}", e);
+                        }
+                    }
+                } else {
+                    println!("❌ Failed to connect to requester");
+                }
+            }
+        }
+    } else {
+        println!("➡️ Push request is not for us (ID mismatch)");
+        // Forward the Push message if TTL allows
+        if header.get_ttl() != 0 {
+            let reverse_stream = MessagePath::get_stream_by_id(header.get_descriptor_id());
+            if let Some(mut reverse_stream) = reverse_stream {
+                Push::send_push(
+                    &mut reverse_stream,
+                    &push_payload,
+                    header.get_descriptor_id(),
+                    header.get_ttl() - 1,
+                    header.get_hops() + 1
+                );
+            }
+        }
+    }
+    
     Ok(())
 }
