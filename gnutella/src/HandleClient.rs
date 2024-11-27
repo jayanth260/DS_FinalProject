@@ -40,6 +40,11 @@ pub fn format_query_hits(payloads: Vec<QueryHit::QueryHit_Payload>) -> Option<(Q
     }
 
     loop {
+        if display_index == 0 {
+            println!("\nNo files found.");
+            return None;
+        }
+        
         table.printstd();
         println!("\nEnter the index of the file you want to download (0-{}), or -1 to finish:", display_index - 1);
         
