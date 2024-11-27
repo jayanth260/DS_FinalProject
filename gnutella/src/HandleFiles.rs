@@ -16,7 +16,7 @@ impl PathValidator {
         let paths: Vec<&str> = paths_content.lines().collect();
         let mut validated_paths = Vec::new();
         let mut total_kb = 0;
-        
+
         for path_str in paths {
             let path = Path::new(path_str);
             if path.exists() && path.is_file() {
@@ -43,11 +43,11 @@ impl PathValidator {
                 eprintln!("Invalid file path or not a file: {}", path_str);
             }
         }
-        
+
         if let Ok(mut shared_files) = SHARED_FILES.lock() {
             *shared_files = validated_paths.clone();
         }
-        
+
         if let Ok(mut shared_files_kb) = SHARED_FILES_KB.lock() {
             *shared_files_kb = total_kb;
         }
@@ -64,7 +64,7 @@ impl PathValidator {
             Vec::new()
         }
     }
-    
+
     // get the total kilobytes of shared files.
     pub fn get_shared_files_kb() -> usize {
         if let Ok(shared_files_kb) = SHARED_FILES_KB.lock() {
@@ -73,38 +73,28 @@ impl PathValidator {
             0
         }
     }
-    
+
     // check if a specific file path is in the list of shared paths.
-    // pub fn is_file_shared(file_path: &str) -> bool {
-    //     if let Ok(shared_files) = SHARED_FILES.lock() {
-    //         shared_files.contains(&file_path.to_string())
-    //     } else {
-    //         false
-    //     }
-    // }
-  
+    pub fn is_file_shared(file_path: &str) -> Vec<(usize, u32)> {
+        let filename = file_path.split('/').last().unwrap_or(file_path);
 
-pub fn is_file_shared(file_path: &str) -> Option<(usize, u32)> {
-    // Extract the filename from the full path
-    let filename = file_path.split('/').last().unwrap_or(file_path);
-
-    if let Ok(shared_files) = SHARED_FILES.lock() {
-        // Find the position of the first shared file that matches the given filename
-        if let Some(index) = shared_files.iter().position(|shared_file| {
-            shared_file.split('/').last().unwrap_or(shared_file) == filename
-        }) {
-            // Get the size of the file in bytes
-            let size = fs::metadata(&shared_files[index])
-                .map(|metadata| metadata.len())
-                .unwrap_or(0); // Use 0 if metadata fails
-            Some((size.try_into().unwrap(),index.try_into().unwrap() ))
+        if let Ok(shared_files) = SHARED_FILES.lock() {
+            shared_files.iter()
+                .enumerate()
+                .filter_map(|(index, shared_file)| {
+                    let shared_filename = shared_file.split('/').last().unwrap_or(shared_file);
+                    if shared_filename == filename {
+                        let size = fs::metadata(shared_file)
+                            .map(|metadata| metadata.len())
+                            .unwrap_or(0);
+                        Some((size.try_into().unwrap(), index.try_into().unwrap()))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         } else {
-            None
+            Vec::new()
         }
-    } else {
-        None // Return None if unable to acquire the lock
     }
-}
-
-    
 }

@@ -69,21 +69,25 @@ pub fn send_query(stream: &mut TcpStream, payload: &Query_Payload, id: &String, 
     stream.write_all(&combined_bytes).expect("Failed to send query");
 }
 
-pub fn search(query: Query_Payload) -> Option<Vec<( u32,u32,String)>> {
+pub fn search(query: Query_Payload) -> Option<Vec<(u32, u32, String)>> {
     let filename_prefix = "filename";
     if let Some(filename_match) = query.Search_Criteria.strip_prefix(filename_prefix) {
         let filename = filename_match.trim();
         
-        // Check local file system or file database for matching files
-        let search_result = HandleFiles::PathValidator::is_file_shared(filename);
+        let search_results = HandleFiles::PathValidator::is_file_shared(filename);
         
-        if let Some(result) = search_result {
-            // println!("\n\nQuery hit\n\n");
-            println!("{:?}",result);
-            return Some(vec![(  result.1,result.0.try_into().unwrap(),filename.to_string())]);
-        } else {
-            // println!("nope");
-            return None;
+        if !search_results.is_empty() {
+            let formatted_results: Vec<(u32, u32, String)> = search_results
+                .into_iter()
+                .map(|(size, index)| (
+                    index,
+                    size as u32,
+                    filename.to_string()
+                ))
+                .collect();
+            
+            println!("Search results: {:?}", formatted_results);
+            return Some(formatted_results);
         }
     }
     None
