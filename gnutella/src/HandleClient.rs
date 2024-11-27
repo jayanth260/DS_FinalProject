@@ -14,6 +14,7 @@ use crate::QueryHit;
 
 use crate::GLOBAL_QUERYHIT_PAYLOADS;
 use crate::Push;
+use crate::HandleFiles;
 
 pub fn format_query_hits(payloads: Vec<QueryHit::QueryHit_Payload>) -> Option<(QueryHit::QueryHit_Payload, QueryHit::FileResult)> {
     let mut table = Table::new();
@@ -159,6 +160,16 @@ pub fn handle_requests(
                                 match push_payload.download_file(&selected_file.file_name) {
                                     Ok(()) => {
                                         println!("✅ File downloaded successfully!");
+                                        // Add downloaded file metadata
+                                        if let Err(e) = HandleFiles::PathValidator::add_downloaded_file(
+                                            format!("downloads/{}", selected_file.file_name),
+                                            selected_hit.Ip_address.clone(),
+                                            selected_hit.Port.clone(),
+                                            selected_file.file_index,
+                                            selected_file.file_size
+                                        ) {
+                                            eprintln!("❌ Failed to store download metadata: {}", e);
+                                        }
                                     },
                                     Err(e) => {
                                         eprintln!("❌ Download failed: {}", e);

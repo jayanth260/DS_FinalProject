@@ -7,6 +7,18 @@ use std::sync::Mutex;
 pub static SHARED_FILES: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
 pub static SHARED_FILES_KB: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(0));
 
+#[derive(Clone, Debug)]
+pub struct DownloadedFileMetadata {
+    pub file_path: String,
+    pub original_host: String,
+    pub original_port: String,
+    pub original_index: u32,
+    pub file_size: u32,
+}
+
+pub static DOWNLOADED_FILES: Lazy<Mutex<Vec<DownloadedFileMetadata>>> = 
+    Lazy::new(|| Mutex::new(Vec::new()));
+
 pub struct PathValidator;
 
 impl PathValidator {
@@ -77,24 +89,83 @@ impl PathValidator {
     // check if a specific file path is in the list of shared paths.
     pub fn is_file_shared(file_path: &str) -> Vec<(usize, u32)> {
         let filename = file_path.split('/').last().unwrap_or(file_path);
+        let mut results = Vec::new();
 
+        // Check original shared files
         if let Ok(shared_files) = SHARED_FILES.lock() {
-            shared_files.iter()
-                .enumerate()
-                .filter_map(|(index, shared_file)| {
-                    let shared_filename = shared_file.split('/').last().unwrap_or(shared_file);
-                    if shared_filename == filename {
-                        let size = fs::metadata(shared_file)
-                            .map(|metadata| metadata.len())
-                            .unwrap_or(0);
-                        Some((size.try_into().unwrap(), index.try_into().unwrap()))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+            results.extend(
+                shared_files.iter()
+                    .enumerate()
+                    .filter_map(|(index, shared_file)| {
+                        let shared_filename = shared_file.split('/').last().unwrap_or(shared_file);
+                        if shared_filename == filename {
+                            let size = fs::metadata(shared_file)
+                                .map(|metadata| metadata.len())
+                                .unwrap_or(0);
+                            Some((size.try_into().unwrap(), index.try_into().unwrap()))
+                        } else {
+                            None
+                        }
+                    })
+            );
+        }
+
+        // Check downloaded files
+        if let Ok(downloaded_files) = DOWNLOADED_FILES.lock() {
+            results.extend(
+                downloaded_files.iter()
+                    .enumerate()
+                    .filter_map(|(index, metadata)| {
+                        let downloaded_filename = metadata.file_path.split('/').last().unwrap_or(&metadata.file_path);
+                        if downloaded_filename == filename {
+                            Some((metadata.file_size as usize, (index + 1000) as u32)) // Offset index to avoid conflicts
+                        } else {
+                            None
+                        }
+                    })
+            );
+        }
+
+        results
+    }
+
+    pub fn add_downloaded_file(
+        file_path: String,
+        host: String,
+        port: String,
+        index: u32,
+        size: u32
+    ) -> io::Result<()> {
+        let metadata = DownloadedFileMetadata {
+            file_path,
+            original_host: host,
+            original_port: port,
+            original_index: index,
+            file_size: size,
+        };
+
+        if let Ok(mut downloaded_files) = DOWNLOADED_FILES.lock() {
+            downloaded_files.push(metadata);
+            
+            // Update the total KB count
+            if let Ok(mut shared_files_kb) = SHARED_FILES_KB.lock() {
+                *shared_files_kb += (size / 1024) as usize;
+            }
+        }
+
+        Ok(())
+    }
+
+    // New method to get file metadata by index
+    pub fn get_file_metadata(index: u32) -> Option<DownloadedFileMetadata> {
+        if let Ok(downloaded_files) = DOWNLOADED_FILES.lock() {
+            if index >= 1000 { // Check if it's a downloaded file
+                downloaded_files.get(index as usize - 1000).cloned()
+            } else {
+                None
+            }
         } else {
-            Vec::new()
+            None
         }
     }
 }
