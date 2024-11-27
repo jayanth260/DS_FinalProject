@@ -6,13 +6,19 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::{thread, time};
 // use std::sync::Mutex;
+use uuid::Uuid;
 
+mod HandleServent;
 pub mod HandleClient;
 mod HandleServent;
 pub mod InitializeConn;
 mod Messages;
 pub mod Pong;
-pub mod HandleFiles;
+mod Messages;
+
+pub static SERVENT_ID:Lazy<Uuid> = Lazy::new(|| {
+    Uuid::new_v4()
+});
 
 pub static GLOBAL_PONG_PAYLOAD: Lazy<Mutex<Pong::Pong_Payload>> = Lazy::new(|| {
     Mutex::new(Pong::Pong_Payload {
@@ -121,8 +127,7 @@ fn main() -> std::io::Result<()> {
     
     let listener = TcpListener::bind(args[1].clone())?;
     println!("Server listening on {}", args[1]);
-
-
+    println!("servent id: {:?}", *SERVENT_ID);
 
     if let Ok(mut payload) = GLOBAL_PONG_PAYLOAD.lock() {
         // split first arg into IP and port

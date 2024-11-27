@@ -1,5 +1,12 @@
 use std::io::prelude::*;
 use std::net::TcpStream;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::Path;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+use lazy_static::lazy_static;
+
 
 use crate::HandleClient;
 use crate::InitializeConn;
@@ -8,6 +15,59 @@ use crate::PingPath;
 use crate::Pong;
 
 use crate::GLOBAL_PONG_PAYLOAD;
+use crate::SERVENT_ID;
+
+pub struct PongLogger;
+
+impl PongLogger {
+    /// Log a Pong message to pongs.txt
+    pub fn log_pong(pong_payload: &Pong::Pong_Payload) -> Result<(), std::io::Error> {
+        // Get current timestamp
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Prepare log entry
+        let log_entry = format!(
+            "{}\tIP: {}\tPort: {}\tFiles: {}\tKB: {}\n",
+            timestamp,
+            pong_payload.Ip,
+            pong_payload.Port,
+            pong_payload.Num_files,
+            pong_payload.Num_kb
+        );
+        let binding = [SERVENT_ID.to_string(),"_pongs.txt".to_string()].concat();
+
+        // Open file in append mode, create if not exists
+        let path = Path::new(&binding);
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+
+        // Write log entry
+        file.write_all(log_entry.as_bytes())?;
+
+        Ok(())
+    }
+
+    /// Thread-safe logging method using a global mutex
+    pub fn thread_safe_log_pong(pong_payload: &Pong::Pong_Payload) {
+        // Use a lazy_static mutex to ensure thread-safe file writing
+        lazy_static! {
+            static ref PONG_LOG_MUTEX: Mutex<()> = Mutex::new(());
+        }
+
+        // Acquire the mutex lock
+        let _lock = PONG_LOG_MUTEX.lock().unwrap();
+
+        // Log the pong
+        if let Err(e) = Self::log_pong(pong_payload) {
+            eprintln!("Failed to log pong: {}", e);
+        }
+    }
+}
 
 pub fn handle_connection(
     streams: &mut Vec<Option<TcpStream>>,
@@ -118,17 +178,22 @@ fn handle_pong_message(
     // println!("Stream: {:?}", current_stream);
 
     let reverse_stream = PingPath::get_stream_by_id(header.get_descriptor_id());
-    if header.get_ttl() != 0 {
-        if let Some(mut reverse_stream) = reverse_stream {
-            // println!("Pong reverse stream: {:?}", reverse_stream);
-            Pong::send_pong(
-                &mut reverse_stream,
-                payload_buff.to_vec(),
-                &header.get_descriptor_id(),
-                &(header.get_ttl() - 1),
-                header.get_hops() + 1,
-            );
-        }
+    if header.get_ttl() !=0{
+    if let Some(mut reverse_stream) = reverse_stream {
+        // println!("Pong reverse stream: {:?}", reverse_stream);
+        Pong::send_pong(
+            &mut reverse_stream,
+            payload_buff.to_vec(),
+            &header.get_descriptor_id(),
+            &(header.get_ttl() - 1),
+            header.get_hops() + 1
+        );
+    }
+    else{
+        // println!("writing");
+        PongLogger::thread_safe_log_pong(&Pong::Pong_Payload::from_bytes(payload_buff));
+    }
+    
     }
     Ok(())
 }
