@@ -8,7 +8,7 @@ use std::time::Duration;
 use prettytable::{Table, Row, Cell};
 use crate::Query;
 use uuid::Uuid;
-
+use prettytable::row;
 use crate::QueryHit;
 // use crate::total_count;
 // use crate::query_hit;
@@ -24,49 +24,57 @@ use crate::QueryHit;
 
 
 use crate::GLOBAL_QUERYHIT_PAYLOADS;
-pub fn format_query_hits(payloads: Vec<QueryHit::QueryHit_Payload>) {
-    // Create a new table
+use crate::Push;
+use crate::HandleFiles;
+
+pub fn format_query_hits(payloads: Vec<QueryHit::QueryHit_Payload>) -> Option<(QueryHit::QueryHit_Payload, QueryHit::FileResult)> {
     let mut table = Table::new();
+    let mut all_results: Vec<(usize, QueryHit::QueryHit_Payload, QueryHit::FileResult)> = Vec::new();
+    let mut display_index = 0;
 
-    // Add a header row
-    table.add_row(Row::new(vec![
-        Cell::new("Servent ID"),
-        Cell::new("File Name"),
-        Cell::new("File Size (B)"),
-        Cell::new("File Index"),
-        Cell::new("IP Address"),
-        Cell::new("Port"),
-        Cell::new("Speed (Kbps)"),
-    ]));
+    // Create downloads directory if it doesn't exist
+    std::fs::create_dir_all("downloads").expect("Failed to create downloads directory");
 
-    // Add rows for each payload and its results
+    table.add_row(row!["Index", "File Name", "Size (bytes)", "IP Address", "Port"]);
+
     for payload in payloads {
         for result in &payload.Results {
-            
-            let  bytes: Vec<u8> = payload.Servent_id
-            .as_bytes()
-            .chunks(8)
-            .map(|chunk| {
-                let chunk_str = std::str::from_utf8(chunk).unwrap();
-                u8::from_str_radix(chunk_str, 2).unwrap()
-            })
-            .collect();
-
-            table.add_row(Row::new(vec![
-                Cell::new(&Uuid::from_slice(&bytes).map_or_else(|_| "Invalid UUID".to_string(), |uuid| uuid.to_string())),
-                Cell::new(&result.file_name),
-
-                Cell::new(&(result.file_size).to_string()), // Convert file size to KB
-                Cell::new(&(result.file_index).to_string()),
-                Cell::new(&payload.Ip_address),
-                Cell::new(&payload.Port),
-                Cell::new(&payload.Speed.to_string()),
-            ]));
+            table.add_row(row![
+                display_index,
+                result.file_name,
+                result.file_size,
+                payload.Ip_address,
+                payload.Port
+            ]);
+            all_results.push((display_index, payload.clone(), result.clone()));
+            display_index += 1;
         }
     }
 
-    // Print the table
-    table.printstd();
+    loop {
+        if display_index == 0 {
+            println!("\nNo files found.");
+            return None;
+        }
+        
+        table.printstd();
+        println!("\nEnter the index of the file you want to download (0-{}), or -1 to finish:", display_index - 1);
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).expect("Failed to read input");
+        let selected_index: i32 = input.trim().parse().unwrap_or(-1);
+
+        if selected_index == -1 {
+            return None;
+        }
+
+        if selected_index >= 0 && selected_index < display_index as i32 {
+            let (_, payload, result) = all_results.remove(selected_index as usize);
+            return Some((payload, result));
+        } else {
+            println!("❌ Invalid index selected.");
+        }
+    }
 }
 
 // Helper functions to interact with the global QueryHit payloads
@@ -108,67 +116,85 @@ pub fn handle_requests(
         println!("🟢 Connection successful!");
         send_ping(stream, Messages::generate_desid(), 2, 0)?;
         
-    } else {
-        println!("❌ Connection unsuccessful. Check server status.");
-    }
-        },
-        None=>{
-           
-        }
-}
-loop {
-    // Clear menu
-    println!("\n===== Gnutella-like P2P File Search =====");
-    println!("1. Search for a file");
-    println!("2. Exit");
-    // println!("3. all");
-    
-    
-    print!("Choose an option (1-2): ");
-    io::stdout().flush().unwrap();
-    
-    let mut choice = String::new();
-    io::stdin().read_line(&mut choice).unwrap();
-    
-    match choice.trim() {
-        "1" => {
-            // File search logic
-            print!("Enter filename to search (case-sensitive): ");
+        loop {
+            // Clear menu
+            println!("\n===== Gnutella-like P2P File Search =====");
+            println!("1. Search for a file");
+            println!("2. Exit");
+            
+            print!("Choose an option (1-2): ");
             io::stdout().flush().unwrap();
             
-            let mut input = String::new();
-            io::stdin().read_line(&mut input).unwrap();
-            let search_criteria = input.trim();
+            let mut choice = String::new();
+            io::stdin().read_line(&mut choice).unwrap();
             
-            if search_criteria.is_empty() {
-                println!("❌ Search term cannot be empty!");
-                continue;
-            }
-            
-            let full_search_criteria = ["filename ".to_string(), search_criteria.to_string()].concat();
-            let query_payload = Query::Query_Payload::new(full_search_criteria, 250);
-            
-            println!("🔍 Searching for: {}", search_criteria);
-            
-            // Broadcast query to all streams
-            match send_query_to_all_streams(&streams, &query_payload) {
-                Ok(header_id) => {
-                    println!("✅ Query sent to {} connected streams", 
-                        count_active_streams(&streams));
+            match choice.trim() {
+                "1" => {
+                    // File search logic
+                    print!("Enter filename to search (case-sensitive): ");
+                    io::stdout().flush().unwrap();
                     
-                     
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input).unwrap();
+                    let search_criteria = input.trim();
                     
-                        thread::sleep(Duration::from_millis(5000));
-          
-                    // println!("{:?}",get_queryhits_by_header_id(&header_id));
-                    format_query_hits(get_queryhits_by_header_id(&header_id))
-                    // display_query_hits(&input, &header_id);
+                    if search_criteria.is_empty() {
+                        println!("❌ Search term cannot be empty!");
+                        continue;
+                    }
                     
-                }
-                Err(e) => {
-                    eprintln!("❌ Error broadcasting query: {}", e);
-                }
-            }
+                    let full_search_criteria = ["filename ".to_string(), search_criteria.to_string()].concat();
+                    let query_payload = Query::Query_Payload::new(full_search_criteria, 250);
+                    
+                    println!("🔍 Searching for: {}", search_criteria);
+                    
+                    // Broadcast query to all streams
+                    match send_query_to_all_streams(&streams, &query_payload) {
+                        Ok(header_id) => {
+                            println!("✅ Query sent to {} connected streams", 
+                                count_active_streams(&streams));
+                            
+                             
+                            
+                                thread::sleep(Duration::from_millis(5000));
+                  
+                            // println!("{:?}",get_queryhits_by_header_id(&header_id));
+                            if let Some((selected_hit, selected_file)) = format_query_hits(get_queryhits_by_header_id(&header_id)) {
+                                let push_payload = Push::Push_Payload {
+                                    Servent_id: selected_hit.Servent_id,
+                                    file_index: selected_file.file_index,
+                                    Ip_address: selected_hit.Ip_address.clone(),
+                                    Port: selected_hit.Port.clone(),
+                                };
+                                
+                                println!("Starting download for file: {}", selected_file.file_name);
+                                
+                                // Just initiate the download directly
+                                match push_payload.download_file(&selected_file.file_name) {
+                                    Ok(()) => {
+                                        println!("✅ File downloaded successfully!");
+                                        // Add downloaded file metadata
+                                        if let Err(e) = HandleFiles::PathValidator::add_downloaded_file(
+                                            format!("downloads/{}", selected_file.file_name),
+                                            selected_hit.Ip_address.clone(),
+                                            selected_hit.Port.clone(),
+                                            selected_file.file_index,
+                                            selected_file.file_size
+                                        ) {
+                                            eprintln!("❌ Failed to store download metadata: {}", e);
+                                        }
+                                    },
+                                    Err(e) => {
+                                        eprintln!("❌ Download failed: {}", e);
+                                    }
+                                }
+                            }
+                            
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Error broadcasting query: {}", e);
+                        }
+                    }
 
             
             // Optional: Wait for user to continue
