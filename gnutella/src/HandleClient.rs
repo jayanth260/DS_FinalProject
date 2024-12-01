@@ -115,7 +115,12 @@ pub fn handle_requests(
     if response.contains("200 OK") {
         println!("🟢 Connection successful!");
         send_ping(stream, Messages::generate_desid(), 2, 0)?;
-        
+    }
+},
+None=>{
+   
+}
+    }
         loop {
             // Clear menu
             println!("\n===== Gnutella-like P2P File Search =====");
@@ -226,14 +231,15 @@ pub fn handle_requests(
             // }
 
             break;
-        }"3"=>{
-            for file in files{
-                let full_search_criteria = ["filename ".to_string(), file.to_string()].concat();
-            let query_payload = Query::Query_Payload::new(full_search_criteria, 250);
-            send_query_to_all_streams(&streams, &query_payload);
-            thread::sleep(Duration::from_millis(5000));   
-            }
         }
+        // "3"=>{
+        //     for file in files{
+        //         let full_search_criteria = ["filename ".to_string(), file.to_string()].concat();
+        //     let query_payload = Query::Query_Payload::new(full_search_criteria, 250);
+        //     send_query_to_all_streams(&streams, &query_payload);
+        //     thread::sleep(Duration::from_millis(5000));   
+        //     }
+        // }
         _ => {
             println!("❌ Invalid option. Please choose 1 or 2.");
         }
